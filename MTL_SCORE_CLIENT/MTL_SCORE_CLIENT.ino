@@ -45,10 +45,10 @@ Adafruit_8x8matrix PeriodDisplay = Adafruit_8x8matrix();
 Adafruit_8x8matrix MtlDisplay = Adafruit_8x8matrix();
 Adafruit_8x8matrix VsDisplay = Adafruit_8x8matrix();
 
-const char* ssid     = "dlink-CB5C";//JEff: "VIDEOTRON3531";
-const char* password = "ctmhs67606";//Jeff:"9JKXYEJ79JYYP";
+const char* ssid     = "youssidhere";
+const char* password = "yourpskhere";
 
-const char* URL = "https://wl2qdbard4.execute-api.ca-central-1.amazonaws.com/dev/getscore?scores&team=";  // Server URL
+const char* URL = "your url here";  // Server URL
 const int TEAM = 8; //MTL = 8
 int port = 80;
 
