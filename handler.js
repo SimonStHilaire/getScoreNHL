@@ -14,7 +14,7 @@ module.exports.getScoreNHL = async (event, context, callback) =>
 
   let params = event.queryStringParameters;
 
-  if(params = null || params == undefined || !params.scores == undefined)
+  if(params == null || params == undefined || !params.scores == undefined)
   {
     const response = 
     {
