@@ -1,15 +1,16 @@
 #include "Arduino.h"
-
+#include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-
-#include <Tone32.h>
 
 //Visual
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Fonts/Picopixel.h>
 #include "Adafruit_LEDBackpack.h"
+#include "pitches.h"
+
+#include <EEPROM.h>
 
 #define DEBUG_PRINT false
 
@@ -21,6 +22,10 @@
 #define SCROLL_DELAY 100
 
 #define BUZZER_PIN 12
+
+#define RESET_PIN 13
+#define NEXT_TEAM_PIN 13
+#define PREVIOUS_TEAM_PIN 14
 
 #define FREQUENCY 2000
 #define BUZZER_CHANNEL 0
@@ -41,49 +46,59 @@ int GAMESTART_SONG[GAMESTART_SONG_SIZE][2] = {{NOTE_C5,300}, {NOTE_C5, 300}, {NO
 int CurrentGameStartNote = GAMESTART_SONG_SIZE;
 unsigned long LastGameStartNoteTime = 0;
 
+#define MTL_WIN_SONG_SIZE 14
+int MTL_WIN_SONG[MTL_WIN_SONG_SIZE][2] = {{NOTE_C4,150}, {NOTE_D4, 150}, {NOTE_F4, 300}, {NOTE_F4, 600}, {NOTE_F4, 150}, {NOTE_G4, 150}, {NOTE_GS4, 300}, {NOTE_GS4, 600}, {NOTE_C5, 300}, {NOTE_AS4, 300}, {NOTE_G4, 600}, {NOTE_G4, 150}, {NOTE_DS4, 150}, {NOTE_F4, 600}};
+
+#define VS_WIN_SONG_SIZE 11
+int VS_WIN_SONG[VS_WIN_SONG_SIZE][2] = {{NOTE_C4,600}, {NOTE_C4, 450}, {NOTE_C4, 300}, {NOTE_C4, 600}, {NOTE_DS4, 450}, {NOTE_D4, 300}, {NOTE_D4, 450}, {NOTE_C4, 300}, {NOTE_C4, 450}, {NOTE_B3,300}, {NOTE_C4, 600}};
+
 Adafruit_8x8matrix PeriodDisplay = Adafruit_8x8matrix();
 Adafruit_8x8matrix MtlDisplay = Adafruit_8x8matrix();
 Adafruit_8x8matrix VsDisplay = Adafruit_8x8matrix();
 
-const char* ssid     = "youssidhere";
-const char* password = "yourpskhere";
+String ssid     = "youssidhere";
+String password = "yourpskhere";
 
-const char* URL = "your url here";  // Server URL
-const int TEAM = 8; //MTL = 8
+String ap_ssid     = "MTL_SCORE";
+String ap_password = "12345678";
+
+const char* URL = "https://wl2qdbard4.execute-api.ca-central-1.amazonaws.com/dev/getscore?scores&team=";  // Server URL
+
 int port = 80;
+
+int TeamsIds[32] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 52, 53, 54, 55};
+int TEAM = 8; //MTL
+int CurrentTeamIndex = 7; //MTL
+
+bool CanNext = false;
+bool CanPrev = false;
+
+unsigned long LastTeamChangeTime = 0;
+
+//AP
+WiFiServer server(80);
+String header;
 
 const char* root_ca= \
 "-----BEGIN CERTIFICATE-----\n" \
-"MIIFmTCCBIGgAwIBAgIQDh+h475hcAblUszPHZYxzjANBgkqhkiG9w0BAQsFADBG\n" \
-"MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRUwEwYDVQQLEwxTZXJ2ZXIg\n" \
-"Q0EgMUIxDzANBgNVBAMTBkFtYXpvbjAeFw0xOTA4MDkwMDAwMDBaFw0yMDA5MDkx\n" \
-"MjAwMDBaMDMxMTAvBgNVBAMMKCouZXhlY3V0ZS1hcGkuY2EtY2VudHJhbC0xLmFt\n" \
-"YXpvbmF3cy5jb20wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC0XrTZ\n" \
-"t4Ogq32TOIIzZAqr8jqutRMV/mFfw3acKeeJcR/NQLj60XBzi8wCvw8hh99RkJYh\n" \
-"cfXUK3FtRRbY3LBjmnT6BLHpuqrnITKAybAH9EmNLi+iPTMHszrJ/hM0ZZPOsBTe\n" \
-"cdVhJSyrU+nZ/CCYEgiEPRso8J5pzguohrXqlYLxd5wWWKFc5SkDaCo7jQ01+Ejz\n" \
-"XSFacqqbUo9zGrdwZCgMuVn5wY5+sIwdOVh1uIdn5pJH7cfKmTo1VJzNmhgFuNa4\n" \
-"U3RnGKjA/A54nAZ2buShZGw+aUEfhl1uqvrkOxGpZT94+Csjbm+FbFjLxm76PHSD\n" \
-"OYSADtZb80fQ/+J1AgMBAAGjggKUMIICkDAfBgNVHSMEGDAWgBRZpGYGUqB7lZI8\n" \
-"o5QHJ5Z0W/k90DAdBgNVHQ4EFgQUou4wHEf9l4l+ifxv6Sy7az+jLfswMwYDVR0R\n" \
-"BCwwKoIoKi5leGVjdXRlLWFwaS5jYS1jZW50cmFsLTEuYW1hem9uYXdzLmNvbTAO\n" \
-"BgNVHQ8BAf8EBAMCBaAwHQYDVR0lBBYwFAYIKwYBBQUHAwEGCCsGAQUFBwMCMDsG\n" \
-"A1UdHwQ0MDIwMKAuoCyGKmh0dHA6Ly9jcmwuc2NhMWIuYW1hem9udHJ1c3QuY29t\n" \
-"L3NjYTFiLmNybDAgBgNVHSAEGTAXMAsGCWCGSAGG/WwBAjAIBgZngQwBAgEwdQYI\n" \
-"KwYBBQUHAQEEaTBnMC0GCCsGAQUFBzABhiFodHRwOi8vb2NzcC5zY2ExYi5hbWF6\n" \
-"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\n" \
+"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\n" \
+"rqXRfboQnoZsG4q5WTP468SQvvG5\n" \
 "-----END CERTIFICATE-----\n";
 
 
@@ -100,6 +115,8 @@ int period = 1;
 int PreviousMtl = 0;
 int PreviousVs = 0;
 
+bool GameStarted = false;
+
 unsigned long ErrorCount = 0;
 
 const long ErrorUpdateDelay = ONE_MINUTE;
@@ -114,14 +131,15 @@ int CurrentScroll = 0;
 
 enum State
 {
-  Connecting,
+  Initial,
+  Configuring,
   Initialization,
   PreGame,
   InGame,
   PostGame
 };
 
-State CurrentState = Connecting;
+State CurrentState = Initial;
 
 //Forwards
 void delayFor(long milliseconds);
@@ -130,11 +148,22 @@ bool GetData();
 void TurnOffDisplays();
 void Connect();
 bool IsConnected();
+bool ReadCredentials(String& ssid, String& psk);
+String GetGetParam(String prefix, String suffix);
+void HandleClient();
+void SetCredentials(String ssid, String psk);
+void PlayMtlWin();
+void PlayVsWin();
+String GetNameFromTeamId(int id);
+void DisplayTeamAbv(String teamAbv);
 
 void setup()
 {
   if(DEBUG_PRINT) Serial.begin(115200);
   delay(100);
+
+  pinMode(RESET_PIN, INPUT);
+  pinMode(PREVIOUS_TEAM_PIN, INPUT);
 
   PeriodDisplay.begin(0x70);
   MtlDisplay.begin(0x71);
@@ -145,21 +174,60 @@ void setup()
   ledcSetup(BUZZER_CHANNEL, FREQUENCY, BUZZER_REZ);
   ledcAttachPin(BUZZER_PIN, BUZZER_CHANNEL);
 
-  Connect();
+  if (!EEPROM.begin(65) && DEBUG_PRINT)
+  {
+    Serial.println("Failed to initialise EEPROM");
+  }
 
-  SetState(Initialization);
+  TEAM = ReadTeamId();
+
+  if(!ReadCredentials(ssid, password) || digitalRead(RESET_PIN) == LOW)
+  {
+    SetState(Configuring);
+  }
+  else
+  {
+    SetState(Initialization);
+  }
 }
 
 void SetState(State newState)
 {
+  if(newState == CurrentState)
+  {
+    return;
+  }
+  
   if(DEBUG_PRINT)
   {
     Serial.print(("New state: "));
     Serial.println(newState);
   }
-  
+ 
   switch(newState)
   {
+    case Configuring:
+    {
+      WiFi.softAP(ap_ssid.c_str(), ap_password.c_str());
+
+      IPAddress IP = WiFi.softAPIP();
+      
+      if(DEBUG_PRINT)
+      {
+        Serial.print("AP IP address: ");
+        Serial.println(IP);
+      }
+
+      server.begin();
+
+      PlayStartGame();
+
+      TurnOffDisplays();
+      
+      sprintf(Message,"Configuration\0");
+     
+      break;
+    }
     case Initialization:
     {
       GetData();
@@ -194,6 +262,8 @@ void SetState(State newState)
     }
     case InGame:
     {   
+      GameStarted = true;
+
       UpdateRemainingTime();
 
       GetData();
@@ -201,12 +271,8 @@ void SetState(State newState)
 
       delay(10);
 
-      PlayStartGame();
-      delay(600);
-      PlayStartGame();
+      PlayStartPeriod();
 
-      
-      
       break;
     }
 
@@ -225,12 +291,14 @@ void SetState(State newState)
 
         if(PreviousMtl > PreviousVs)
         {
-          PlayMtlGoal();
+          PlayMtlWin();
         }
         else
         {
-          PlayVsGoal();
+          PlayVsWin();
         }
+
+        GameStarted = false;
       }
       break;
     }
@@ -323,6 +391,12 @@ void UpdateRemainingTime()
   int waitHours = (waitTime == 0) ? 0 : remaining/ONE_HOUR;
   int waitMinutes = (waitTime == 0) ? 0 : ((remaining - (waitHours*ONE_HOUR)) / ONE_MINUTE) + 1;
 
+  if(waitMinutes == 60)
+  {
+    waitHours += 1;
+    waitMinutes = 0;
+  }
+
   MtlDisplay.setFont(&Picopixel);
   MtlDisplay.setTextSize(1);
   MtlDisplay.setTextWrap(false);  // we dont want text to wrap so it scrolls nicely
@@ -379,6 +453,37 @@ void UpdateWaitMessage()
   }
 }
 
+void PlayMtlWin()
+{
+  for(int j = 0; j < 2; ++j)
+  {
+    for(int i = 0; i < MTL_WIN_SONG_SIZE; ++i)
+    {
+      ledcWriteTone(BUZZER_CHANNEL, MTL_WIN_SONG[i][0]);
+      delay(MTL_WIN_SONG[i][1]);
+    }
+
+    if(j == 0)
+    {
+      ledcWriteTone(BUZZER_CHANNEL, 0);
+      delay(300);
+    }
+  }
+
+  ledcWriteTone(BUZZER_CHANNEL, 0);
+}
+
+void PlayVsWin()
+{
+  for(int i = 0; i <VS_WIN_SONG_SIZE; ++i)
+  {
+    ledcWriteTone(BUZZER_CHANNEL, VS_WIN_SONG[i][0]);
+    delay(VS_WIN_SONG[i][1]);
+  }
+
+  ledcWriteTone(BUZZER_CHANNEL, 0);
+}
+
 void PlayMtlGoal()
 {
   for(int i = 0; i < MTL_GOAL_SONG_SIZE; ++i)
@@ -410,6 +515,13 @@ void PlayStartGame()
   }
 
   ledcWriteTone(BUZZER_CHANNEL, 0);
+}
+
+void PlayStartPeriod()
+{
+  PlayStartGame();
+  delay(600);
+  PlayStartGame();
 }
 
 void PlayMtlGoalNote(int noteIndex)//Async: call this once with 0 to start song
@@ -470,6 +582,65 @@ void loop()
 {
   switch(CurrentState)
   {
+    case Configuring:
+    {
+      HandleClient();
+
+      if(LastTeamChangeTime == 0)
+      {
+        if(strlen(Message) > 0)
+          UpdateWaitMessage();
+      }
+      else if((millis() - LastTeamChangeTime) >= 5000)
+      {
+        LastTeamChangeTime = 0;
+        TEAM = TeamsIds[CurrentTeamIndex];
+        WriteTeamId(TEAM);
+
+        TurnOffDisplays();
+        
+        sprintf(Message,"Configuration\0");
+      }
+              
+      if(CanNext && (digitalRead(NEXT_TEAM_PIN) == LOW) && ((millis() - LastTeamChangeTime) > 250))
+      {
+        CurrentTeamIndex++;
+
+        if(CurrentTeamIndex >= 32)
+          CurrentTeamIndex = 0;
+          
+        LastTeamChangeTime = millis();
+        CanNext = false;
+        DisplayTeamAbv();
+        
+      }
+      else if(CanPrev && (digitalRead(PREVIOUS_TEAM_PIN) == LOW) && ((millis() - LastTeamChangeTime) > 250))
+      {
+        CurrentTeamIndex--;
+
+        if(CurrentTeamIndex < 0)
+          CurrentTeamIndex = 31;
+          
+        LastTeamChangeTime = millis();
+        CanPrev = false;
+        DisplayTeamAbv();
+        
+      }
+
+      if(!CanNext && digitalRead(NEXT_TEAM_PIN) == HIGH)
+      {
+        CanNext = true;
+        delay(100);
+      }
+
+       if(!CanPrev && digitalRead(PREVIOUS_TEAM_PIN) == HIGH)
+       {
+          CanPrev = true;
+       }
+      
+      break;
+    }
+    
     case Initialization:
     {
       if(error != 0 && (millis() - LastGetDataMillis > ErrorUpdateDelay))
@@ -539,7 +710,10 @@ void loop()
 
       if(error != 0)
       {
-        SetState(Initialization);
+        if(error == 444)
+          SetState(PostGame);
+        else
+          SetState(Initialization);
       }
       else
       {
@@ -580,12 +754,14 @@ void Connect()
   {
     if(DEBUG_PRINT) Serial.print("Attempting to connect to SSID: ");
     if(DEBUG_PRINT) Serial.println(ssid);
+
+    DisplayTeamAbv();
   
     WiFi.disconnect(false);
-    WiFi.begin(ssid, password);
+    WiFi.begin(ssid.c_str(), password.c_str());
   
     //TODO: do in loop so we can display a message or use yield?
-    for(int i = 0; i < 5; ++i)
+    for(int i = 0; i < 6; ++i)
     {
       if(DEBUG_PRINT) Serial.print(".");
       // wait 1 second for re-trying
@@ -598,6 +774,23 @@ void Connect()
         if(DEBUG_PRINT) Serial.println(ssid);
         
         break;
+      }
+      else
+      {
+        if(i%2 == 0)
+        {
+          PeriodDisplay.clear();
+          PeriodDisplay.drawLine(3,0, 3,7, LED_ON);
+          PeriodDisplay.drawLine(4,0, 4,7, LED_ON);
+          PeriodDisplay.writeDisplay();
+        }
+        else
+        {
+          PeriodDisplay.clear();
+          PeriodDisplay.drawLine(0,3, 7,3, LED_ON);
+          PeriodDisplay.drawLine(0,4, 7,4, LED_ON);
+          PeriodDisplay.writeDisplay();
+        }
       }
     }
   }
@@ -619,6 +812,7 @@ bool GetData()
   HTTPClient http;
 
   String url = URL + String(TEAM);
+  if(DEBUG_PRINT) Serial.println("URL: " + url);
   http.begin(url, root_ca);
   int httpCode = http.GET();
 
@@ -669,7 +863,16 @@ bool GetData()
     waitTime = doc["t"];
     mtl = doc["m"];
     vs = doc["v"];
-    period = doc["p"];
+
+    //Period
+    int newPeriod = doc["p"];
+    
+    if(GameStarted && newPeriod > period)
+    {
+      PlayStartPeriod();
+    }
+
+    period = newPeriod;
     
     ErrorCount = 0;
      
@@ -677,15 +880,14 @@ bool GetData()
     {
       Message[0] = '\0';
     }
-   
   }
 
-  if(mtl > PreviousMtl)
+  if(GameStarted && mtl > PreviousMtl)
   {
     PlayMtlGoal();
   }
 
-  if(vs > PreviousVs)
+  if(GameStarted && vs > PreviousVs)
   {
     PlayVsGoal();
   }
@@ -697,7 +899,15 @@ bool GetData()
     if(ErrorCount > 3)
     {
       Serial.println("Displaying error");
-      sprintf(Message,"Erreur %d\0", error);
+      
+      if(error == 999)
+      {
+        sprintf(Message,"Prochain match non planifie - %d\0", error);
+      }
+      else
+      {
+        sprintf(Message,"Erreur %d\0", error);
+      }
     }
     else if(DEBUG_PRINT) 
     {
@@ -797,4 +1007,376 @@ void delayFor(long milliseconds)
     {
         yield();
     }
+}
+
+bool ReadCredentials(String& ssid, String& psk)
+{
+  ssid = EEPROM.readString(0);
+  psk = EEPROM.readString(32);
+
+  if(ssid.length() > 0 && psk.length() > 0)
+  {
+    if(DEBUG_PRINT)
+    {
+      Serial.print("SSID: ");
+      Serial.println(ssid);
+      
+      Serial.print("PSK: ");
+      Serial.println(psk);
+    }
+
+    return true;
+  }
+
+  Serial.println("No credentials");
+  
+  return false;
+}
+
+int ReadTeamId()
+{
+  int teamid = EEPROM.read(64);
+
+  if(teamid == 255)
+    teamid = 8; //MTL by default
+
+  for(int i = 0; i < 31; ++i)
+  {
+    if(TeamsIds[i] == teamid)
+    {
+      CurrentTeamIndex = i;
+    }
+  }
+
+  return teamid;
+}
+
+void WriteTeamId(int teamId)
+{
+    EEPROM.write(64, teamId);
+    EEPROM.commit();
+}
+
+String GetGetParam(String prefix, String suffix)
+{
+  int startIndex = header.indexOf(prefix);
+
+  if (startIndex >= 0)
+  {
+    int endIndex = header.indexOf(suffix);
+
+    if(endIndex > startIndex)
+    {
+      return header.substring(startIndex+prefix.length(), endIndex);
+    }
+  }
+
+  return "";
+}
+
+void HandleClient()
+{
+  WiFiClient client = server.available();   // Listen for incoming clients
+
+  if (client)
+  {
+    String currentLine = "";
+    
+    while (client.connected())
+    {
+      if(strlen(Message) > 0)
+        UpdateWaitMessage();
+
+      if (client.available())
+      {             
+        char c = client.read();
+        
+        header += c;
+        if (c == '\n') 
+        {    
+          if (currentLine.length() == 0)
+          {
+            if(header.indexOf("GET /config.php") >= 0)
+            {
+              String teamId = GetGetParam("team=", "&ssid");
+
+              if(teamId.length() > 0)
+              {
+                int newTeam = teamId.toInt();
+                WriteTeamId(newTeam);
+              }
+              
+              String newssid = GetGetParam("&ssid=", "&psk");
+  
+              String newpsk = GetGetParam("&psk=", "&action");
+
+              if(newssid.length() > 0 && newpsk.length() > 0)
+              {
+                SetCredentials(newssid, newpsk);
+              }
+
+              ESP.restart();
+            }
+
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html");
+            client.println("Connection: close");
+            client.println();
+                
+            //Web page
+            client.println("<!DOCTYPE html><html>");
+            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+            client.println("<link rel=\"icon\" href=\"data:,\">");
+            // CSS to style the on/off buttons 
+            // Feel free to change the background-color and font-size attributes to fit your preferences
+            client.println("<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}");
+            client.println("text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}");
+            client.println("</style></head>");
+
+            client.println("<body><h1>Configuration MTL Score</h1>");
+
+             client.println("<form method=\"GET\" action=\"config.php\" id=\"config\" />");
+
+            client.println("Equipe: <select id=\"team\" name=\"team\" form=\"config\" />" \
+              "<option value=\"1\" />New Jersey Devils</option />" \
+              "<option value=\"2\" />New York Islanders</option />" \
+              "<option value=\"3\" />New York Rangers</option />" \
+              "<option value=\"4\" />Philadelphia Flyers</option />" \
+              "<option value=\"5\" />Pittsburgh Penguins</option />" \
+              "<option value=\"6\" />Boston Bruins</option />" \
+              "<option value=\"7\" />Buffalo Sabres</option />" \
+              "<option value=\"8\" />Montreal Canadiens</option />" \
+              "<option value=\"9\" />Ottawa Senators</option />" \
+              "<option value=\"10\" />Toronto Maple Leafs</option />" \
+              "<option value=\"12\" />Carolina Hurricanes</option />" \
+              "<option value=\"13\" />Florida Panthers</option />" \
+              "<option value=\"14\" />Tampa Bay Lightning</option />" \
+              "<option value=\"15\" />Washington Capitals</option />" \
+              "<option value=\"16\" />Chicago Blackhawks</option />" \
+              "<option value=\"17\" />Detroit Red Wings</option />" \
+              "<option value=\"18\" />Nashville Predators</option />" \
+              "<option value=\"19\" />St Louis Blues</option />" \
+              "<option value=\"20\" />Calgary Flames</option />" \
+              "<option value=\"21\" />Colorado Avalanche</option />" \
+              "<option value=\"22\" />Edmonton Oilers</option />" \
+              "<option value=\"23\" />Vancouver Canucks</option />" \
+              "<option value=\"24\" />Anaheim Ducks</option />" \
+              "<option value=\"25\" />Dallas Stars</option />" \
+              "<option value=\"26\" />Los Angeles Kings</option />" \
+              "<option value=\"28\" />San Jose Sharks</option />" \
+              "<option value=\"29\" />Columbus Blue Jackets </option />" \
+              "<option value=\"30\" />Minnesota Wild</option />" \
+              "<option value=\"52\" />Winnipeg Jets</option />" \
+              "<option value=\"53\" />Arizona Coyotes</option />" \
+              "<option value=\"54\" />Vegas Golden Knights</option />" \
+              "<option value=\"55\" />Seattle Kraken</option />" \
+              "</select /><br />");
+            client.println("Nom du reseau: <input type=\"text\" name=\"ssid\" /> <br />");
+            client.println("Mot de passe: <input type=\"text\" name=\"psk\" /> <br /> <br />");
+            
+            client.println("<input type=\"submit\" name=\"action\" value=\"Configurer\" />");
+            
+            client.println("</form>");
+            
+            client.println("</body></html>");
+            
+            client.println();
+
+            break;
+          } 
+          else 
+          {
+            currentLine = "";
+          }
+        } 
+        else if (c != '\r')
+        {
+          currentLine += c;
+        }
+      }
+    }
+
+    header = "";
+
+    client.stop();
+  }
+}
+
+void SetCredentials(String new_ssid, String new_psk)
+{
+    char ssid_c[32];
+    
+    sprintf(ssid_c, new_ssid.c_str());
+    EEPROM.writeString(0, ssid_c);
+
+    char psk_c[32];
+    sprintf(psk_c, new_psk.c_str());
+    EEPROM.writeString(32, psk_c);
+    EEPROM.commit();
+}
+
+String GetNameFromTeamId(int id)
+{
+  switch(id)
+  {
+    case 1:
+    {
+      return "NJD";
+    }
+    case 2:
+    {
+      return "NYI";
+    }
+    case 3:
+    {
+      return "NYR";
+    }
+    case 4: 
+    {
+      return "PHI";
+    }
+    case 5:  
+    {
+      return "PIT";
+    }
+    case 6:  
+    {
+      return "BOS";
+    }
+    case 7:  
+    {
+      return "BUF";
+    }
+    case 8:  
+    {
+      return "MTL";
+    }
+    case 9:  
+    {
+      return "OTT";
+    }
+    case 10:  
+    {
+      return "TOR";
+    }
+    case 12:  
+    {
+      return "CAR";
+    }
+    case 13:  
+    {
+      return "FLA";
+    }
+    case 14:  
+    {
+      return "TBL";
+    }
+    case 15:  
+    {
+      return "WSH";
+    }
+    case 16:  
+    {
+      return "CHI";
+    }
+    case 17:  
+    {
+      return "DET";
+    }
+    case 18:  
+    {
+      return "NSH";
+    }
+    case 19:  
+    {
+      return "STL";
+    }
+    case 20:  
+    {
+      return "CGY";
+    }
+    case 21:  
+    {
+      return "COL";
+    }
+    case 22:  
+    {
+      return "EDM";
+    }
+    case 23:  
+    {
+      return "VAN";
+    }
+    case 24:  
+    {
+      return "ANA";
+    }
+    case 25:  
+    {
+      return "DAL";
+    }
+    case 26:  
+    {
+      return "LAK";
+    }
+    case 28:  
+    {
+      return "SJS";
+    }
+    case 29:  
+    {
+      return "CBJ";
+    }
+    case 30:  
+    {
+      return "MIN";
+    }
+    case 52:  
+    {
+      return "WPG";
+    }
+    case 53:  
+    {
+      return "ARI";
+    }
+    case 54:
+    {
+      return "VGK";
+    }
+    case 55:
+    {
+      return "SEA";
+    }
+  }
+
+  return "ERR";
+}
+
+void DisplayTeamAbv()
+{
+  String teamAbv = GetNameFromTeamId(TeamsIds[CurrentTeamIndex]);
+  
+  PeriodDisplay.clear();
+  PeriodDisplay.setCursor(1,1);
+  PeriodDisplay.setTextSize(1);
+  PeriodDisplay.setTextWrap(false);  // we dont want text to wrap so it scrolls nicely
+  PeriodDisplay.setTextColor(LED_ON);
+  PeriodDisplay.print(teamAbv[0]);
+  PeriodDisplay.writeDisplay();
+
+  MtlDisplay.clear();
+  MtlDisplay.setCursor(1,1);
+  MtlDisplay.setTextSize(1);
+  MtlDisplay.setTextWrap(false);  // we dont want text to wrap so it scrolls nicely
+  MtlDisplay.setTextColor(LED_ON);
+  MtlDisplay.print(teamAbv[1]);
+  MtlDisplay.writeDisplay();
+
+  VsDisplay.clear();
+  VsDisplay.setCursor(1,1);
+  VsDisplay.setTextSize(1);
+  VsDisplay.setTextWrap(false);  // we dont want text to wrap so it scrolls nicely
+  VsDisplay.setTextColor(LED_ON);
+  VsDisplay.print(teamAbv[2]);
+  VsDisplay.writeDisplay();
 }
