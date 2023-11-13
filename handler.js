@@ -63,49 +63,6 @@ module.exports.getScoreNHL = async (event, context, callback) =>
   };
 
   callback(null, response);
-
-  /*var parsedData = JSON.parse(data);
-
-  log(parsedData);
-
-  if(parsedData.t == 0)//Are we live
-  {
-    log("link: " + parsedData.l);
-    log("home:" + parsedData.h);
-    var scores = await GetScore(parsedData.l, parsedData.h);
-
-    log(scores);
-
-    const response = 
-    {
-      statusCode: 200,
-      headers: {
-        'Access-Control-Allow-Origin': '*', // Required for CORS support to work
-        'Content-Type': 'application/json',
-      },
-      body: scores,
-    };
-
-    callback(null, response);
-
-  }
-  else
-  {
-    log(data);
-
-    const response = 
-    {
-      statusCode: 200,
-      headers: {
-        'Access-Control-Allow-Origin': '*', // Required for CORS support to work
-        'Content-Type': 'application/json',
-      },
-      body: data,
-    };
-
-    callback(null, response);
- }
- */
 };
 
 function log(msg)
@@ -164,7 +121,7 @@ function GetGameData(team = 8)
                   return resolve('{"e":0,"t":322080,"p":0,"m":0,"v":0}');
               }
               
-              if(element.gameState == "OFF")
+              if(element.gameState == "OFF" || element.gameState == "FINAL")
               {
                   log("Game ended");
                   return resolve('{"e":444,"t":0,"p":0,"m":0,"v":0}');
@@ -198,38 +155,3 @@ function GetGameData(team = 8)
     });
   });
 }
-
-/*
-function GetScore(link, atHome)
-{
-  return new Promise(
-    (resolve, reject) =>
-  {
-    superagent.get('https://statsapi.web.nhl.com' + link, (error, res) =>
-    {
-      log('https://statsapi.web.nhl.com' + link);
-
-      if(res.statusCode != 200)
-        return;
-
-        const data = JSON.parse(res.text);
-
-        if(data != undefined && data.hasOwnProperty("liveData") && data.liveData.hasOwnProperty("plays") && data.liveData.plays.hasOwnProperty("currentPlay") &&
-          data.liveData.plays.currentPlay.hasOwnProperty("about") && data.liveData.plays.currentPlay.about.hasOwnProperty("goals") && 
-          data.liveData.plays.currentPlay.about.goals.hasOwnProperty("away") && data.liveData.plays.currentPlay.about.goals.hasOwnProperty("home"))
-        {
-          var scoreMtl = atHome == 1 ? data.liveData.plays.currentPlay.about.goals.home : data.liveData.plays.currentPlay.about.goals.away;
-          var scoreVs = atHome == 0 ? data.liveData.plays.currentPlay.about.goals.home : data.liveData.plays.currentPlay.about.goals.away;
-          var period = data.liveData.plays.currentPlay.about.period;
-
-          return resolve('{"e":0,"t":0,"m":' + scoreMtl + ',"v":' + scoreVs + ',"p":' + period + '}');
-        }
-        else
-        {
-          log("No game now: maybe postponed");
-          return resolve('{"e":484,"t":0,"p":0,"m":0,"v":0}');
-        }
-    });
-  });
-}
-*/
